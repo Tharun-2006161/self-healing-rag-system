@@ -173,7 +173,14 @@ text_splitter = RecursiveCharacterTextSplitter(
 # This prevents the first /api/documents request from timing out or hitting memory spikes.
 print("Initializing embedding model...")
 try:
-    collection.query(query_texts=["init"], n_results=1)
+    # We must ADD a document to force the embedding model to download and initialize.
+    # Querying an empty collection just returns an error without loading the model.
+    collection.add(
+        documents=["dummy initialization document"],
+        ids=["dummy_id_1"],
+        metadatas=[{"source": "init"}]
+    )
+    collection.delete(ids=["dummy_id_1"])
     print("Embedding model loaded successfully.")
 except Exception as e:
     print(f"Embedding model init info (expected if empty): {e}")
