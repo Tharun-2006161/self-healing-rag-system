@@ -158,9 +158,18 @@ STATIC_FOLDER = Path(__file__).parent / "static"
 KB_IMAGES_FOLDER = STATIC_FOLDER / "kb_images"
 KB_IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
 
+import chromadb.utils.embedding_functions as embedding_functions
+
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
+
+# Use Google Gemini API for embeddings to save RAM
+google_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
+    api_key=os.environ.get("GOOGLE_API_KEY", "dummy_key")
+)
+
 collection = chroma_client.get_or_create_collection(
     name="knowledge_base",
+    embedding_function=google_ef,
     metadata={"hnsw:space": "cosine"}
 )
 
