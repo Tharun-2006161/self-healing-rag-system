@@ -4,7 +4,7 @@ python-multipart
 python-dotenv
 bcrypt
 PyJWT
-aiosmtplib
+pymongo
 langchain-groq
 langchain-core
 langchain-text-splitters

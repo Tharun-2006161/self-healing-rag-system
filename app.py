@@ -1,26 +1,25 @@
 """
 AU Chatbot — Web Server
 Serves a beautiful chat UI and exposes the RAG agent via REST API.
-Includes authentication, email OTP, role-based access, and document management.
+Includes authentication, MongoDB persistence, role-based access, and document management.
 """
 
 import os
 import re
 import time
-import sqlite3
 import secrets
-import smtplib
 import bcrypt
 import jwt
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypedDict, Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, Response, BackgroundTasks
+from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -28,42 +27,19 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import chromadb
 from langgraph.graph import StateGraph, END
 from dotenv import load_dotenv
-import aiosmtplib
 
 load_dotenv()
 
 
-# ── Database Setup (SQLite) ──────────────────────────────────────────────────
+# ── Database Setup (MongoDB) ─────────────────────────────────────────────────
 
-DB_PATH = Path(__file__).parent / "users.db"
+MONGODB_URL = os.environ.get("MONGODB_URL", "")
+mongo_client = MongoClient(MONGODB_URL)
+mongo_db = mongo_client["au_chatbot"]
+users_collection = mongo_db["users"]
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE,
-            username TEXT,
-            password_hash TEXT,
-            role TEXT DEFAULT 'user',
-            verified INTEGER DEFAULT 0,
-            created_at TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS otp_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT,
-            code TEXT,
-            created_at TEXT,
-            expires_at TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
+# Create unique index on email
+users_collection.create_index("email", unique=True)
 
 
 # ── Authentication config ────────────────────────────────────────────────────
@@ -71,19 +47,9 @@ init_db()
 JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_secret_key_12345")
 JWT_ALGORITHM = "HS256"
 ADMIN_EMAIL = "golthitharunkumar@gmail.com"
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 
 
 # ── Auth Helpers ─────────────────────────────────────────────────────────────
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -95,11 +61,11 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
-def get_current_user(request: Request, db: sqlite3.Connection = Depends(get_db)):
+def get_current_user(request: Request):
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
+
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         email: str = payload.get("sub")
@@ -107,14 +73,12 @@ def get_current_user(request: Request, db: sqlite3.Connection = Depends(get_db))
             raise HTTPException(status_code=401, detail="Invalid token")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-        
-    c = db.cursor()
-    c.execute("SELECT * FROM users WHERE email = ?", (email,))
-    user = c.fetchone()
+
+    user = users_collection.find_one({"email": email}, {"_id": 0})
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
-        
-    return dict(user)
+
+    return user
 
 def get_current_admin(user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
@@ -393,7 +357,7 @@ async def home():
 # ── Auth Endpoints ──────────────────────────────────────────────────────────
 
 @app.post("/api/auth/register")
-async def register(request: Request, db: sqlite3.Connection = Depends(get_db)):
+async def register(request: Request):
     data = await request.json()
     email = data.get("email", "").strip().lower()
     username = data.get("username", "").strip()
@@ -402,53 +366,32 @@ async def register(request: Request, db: sqlite3.Connection = Depends(get_db)):
     if not email or not username or not password:
         return JSONResponse({"error": "Missing required fields"}, status_code=400)
 
-    c = db.cursor()
-    c.execute("SELECT * FROM users WHERE email = ?", (email,))
-    if c.fetchone():
-        return JSONResponse({"error": "Email already registered"}, status_code=400)
-
     hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
     role = "admin" if email == ADMIN_EMAIL else "user"
 
-    c.execute(
-        "INSERT INTO users (email, username, password_hash, role, verified, created_at) VALUES (?, ?, ?, ?, 1, ?)",
-        (email, username, hashed_pw.decode('utf-8'), role, datetime.utcnow().isoformat())
-    )
-    db.commit()
+    try:
+        users_collection.insert_one({
+            "email": email,
+            "username": username,
+            "password_hash": hashed_pw.decode('utf-8'),
+            "role": role,
+            "verified": 1,
+            "created_at": datetime.utcnow().isoformat()
+        })
+    except DuplicateKeyError:
+        return JSONResponse({"error": "Email already registered"}, status_code=400)
 
     return {"message": "Registration successful. You can now login."}
 
 
 @app.post("/api/auth/verify-otp")
-async def verify_otp(request: Request, db: sqlite3.Connection = Depends(get_db)):
-    data = await request.json()
-    email = data.get("email", "").strip().lower()
-    code = data.get("code", "").strip()
-
-    if not email or not code:
-        return JSONResponse({"error": "Missing email or code"}, status_code=400)
-
-    c = db.cursor()
-    c.execute("SELECT * FROM otp_codes WHERE email = ? AND code = ?", (email, code))
-    otp_record = c.fetchone()
-
-    if not otp_record:
-        return JSONResponse({"error": "Invalid OTP code"}, status_code=400)
-
-    expires_at = datetime.fromisoformat(otp_record["expires_at"])
-    if datetime.utcnow() > expires_at:
-        return JSONResponse({"error": "OTP code has expired"}, status_code=400)
-
-    # Valid OTP -> Verify user
-    c.execute("UPDATE users SET verified = 1 WHERE email = ?", (email,))
-    c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-    db.commit()
-
+async def verify_otp(request: Request):
+    # Legacy endpoint - OTP verification not used anymore
     return {"message": "Account verified successfully. You can now login."}
 
 
 @app.post("/api/auth/login")
-async def login(request: Request, response: Response, db: sqlite3.Connection = Depends(get_db)):
+async def login(request: Request, response: Response):
     data = await request.json()
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
@@ -456,15 +399,13 @@ async def login(request: Request, response: Response, db: sqlite3.Connection = D
     if not email or not password:
         return JSONResponse({"error": "Missing email or password"}, status_code=400)
 
-    c = db.cursor()
-    c.execute("SELECT * FROM users WHERE email = ?", (email,))
-    user = c.fetchone()
+    user = users_collection.find_one({"email": email}, {"_id": 0})
 
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user["password_hash"].encode('utf-8')):
         return JSONResponse({"error": "Invalid email or password"}, status_code=401)
 
     access_token = create_access_token(data={"sub": user["email"]})
-    
+
     response = JSONResponse({
         "message": "Login successful",
         "user": {
@@ -477,9 +418,9 @@ async def login(request: Request, response: Response, db: sqlite3.Connection = D
         key="access_token",
         value=access_token,
         httponly=True,
-        max_age=7 * 24 * 60 * 60,  # 7 days
+        max_age=7 * 24 * 60 * 60,
         samesite="lax",
-        secure=False # Set to True in prod with HTTPS
+        secure=False
     )
     return response
 
@@ -501,75 +442,28 @@ async def logout():
 
 
 @app.post("/api/auth/forgot-password")
-async def forgot_password(request: Request, db: sqlite3.Connection = Depends(get_db)):
-    data = await request.json()
-    email = data.get("email", "").strip().lower()
-
-    if not email:
-        return JSONResponse({"error": "Missing email"}, status_code=400)
-
-    c = db.cursor()
-    c.execute("SELECT * FROM users WHERE email = ? AND verified = 1", (email,))
-    user = c.fetchone()
-
-    if not user:
-        return JSONResponse({"error": "Account not found or not verified"}, status_code=404)
-
-    # Generate OTP
-    code = f"{secrets.randbelow(1000000):06d}"
-    expires = datetime.utcnow() + timedelta(minutes=5)
-    
-    c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-    c.execute(
-        "INSERT INTO otp_codes (email, code, created_at, expires_at) VALUES (?, ?, ?, ?)",
-        (email, code, datetime.utcnow().isoformat(), expires.isoformat())
-    )
-    db.commit()
-
-    try:
-        await send_otp_email(email, code)
-    except Exception as e:
-        error_msg = str(e)
-        return JSONResponse({"error": f"Email failed: {error_msg}"}, status_code=500)
-
-    return {"message": "OTP sent to email", "email": email}
+async def forgot_password(request: Request):
+    return JSONResponse({"error": "Password reset via email is not configured."}, status_code=501)
 
 
 @app.post("/api/auth/reset-password")
-async def reset_password(request: Request, db: sqlite3.Connection = Depends(get_db)):
+async def reset_password(request: Request):
     data = await request.json()
     email = data.get("email", "").strip().lower()
-    code = data.get("code", "").strip()
     new_password = data.get("new_password", "")
 
-    if not email or not code or not new_password:
+    if not email or not new_password:
         return JSONResponse({"error": "Missing required fields"}, status_code=400)
 
-    c = db.cursor()
-    c.execute("SELECT * FROM otp_codes WHERE email = ? AND code = ?", (email, code))
-    otp_record = c.fetchone()
+    user = users_collection.find_one({"email": email})
+    if not user:
+        return JSONResponse({"error": "Account not found"}, status_code=404)
 
-    if not otp_record:
-        return JSONResponse({"error": "Invalid or expired OTP"}, status_code=400)
-
-    expires_at = datetime.fromisoformat(otp_record["expires_at"])
-    if datetime.utcnow() > expires_at:
-        c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-        db.commit()
-        return JSONResponse({"error": "OTP has expired. Please request a new one."}, status_code=400)
-
-    # Hash new password
     hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
-
-    # Update password
-    c.execute(
-        "UPDATE users SET password_hash = ? WHERE email = ?",
-        (hashed_pw.decode('utf-8'), email)
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"password_hash": hashed_pw.decode('utf-8')}}
     )
-    
-    # Delete OTP
-    c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-    db.commit()
 
     return {"message": "Password updated successfully"}
 
