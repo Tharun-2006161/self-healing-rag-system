@@ -257,6 +257,40 @@ body {
     box-shadow: 0 0 0 3px rgba(57, 73, 171, 0.15);
 }
 
+/* Password visibility toggle */
+.password-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-wrapper input {
+    padding-right: 44px !important;
+}
+
+.eye-btn {
+    position: absolute;
+    right: 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 6px;
+    transition: color 0.2s ease, background 0.2s ease;
+    line-height: 0;
+}
+
+.eye-btn:hover {
+    color: var(--accent-gold);
+    background: rgba(255, 215, 0, 0.08);
+}
+
+
+
 .auth-btn {
     width: 100%;
     padding: 14px;
