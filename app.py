@@ -189,7 +189,7 @@ class GeminiEmbeddingFunction(embedding_functions.EmbeddingFunction):
 google_ef = GeminiEmbeddingFunction(api_key=os.environ.get("GOOGLE_API_KEY", "dummy_key"))
 
 collection = chroma_client.get_or_create_collection(
-    name="knowledge_base",
+    name="knowledge_base_gemini",
     embedding_function=google_ef,
     metadata={"hnsw:space": "cosine"}
 )
