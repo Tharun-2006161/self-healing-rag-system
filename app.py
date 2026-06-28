@@ -418,38 +418,7 @@ async def google_auth_callback(request: Request, response: Response):
         print("Google auth error:", e)
         return RedirectResponse(url="/?error=google_auth_failed")
 
-@app.post("/api/auth/register")
-async def register(request: Request):
-    data = await request.json()
-    email = data.get("email", "").strip().lower()
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
 
-    if not email or not username or not password:
-        return JSONResponse({"error": "Missing required fields"}, status_code=400)
-
-    hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    role = "admin" if email == ADMIN_EMAIL else "user"
-
-    try:
-        users_collection.insert_one({
-            "email": email,
-            "username": username,
-            "password_hash": hashed_pw.decode('utf-8'),
-            "role": role,
-            "verified": 1,
-            "created_at": datetime.utcnow().isoformat()
-        })
-    except DuplicateKeyError:
-        return JSONResponse({"error": "Email already registered"}, status_code=400)
-
-    return {"message": "Registration successful. You can now login."}
-
-
-@app.post("/api/auth/verify-otp")
-async def verify_otp(request: Request):
-    # Legacy endpoint - OTP verification not used anymore
-    return {"message": "Account verified successfully. You can now login."}
 
 
 @app.post("/api/auth/login")

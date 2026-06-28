@@ -6,23 +6,17 @@ document.addEventListener('DOMContentLoaded', function () {
     
     // Pages
     const pageLogin = document.getElementById('page-login');
-    const pageRegister = document.getElementById('page-register');
-    const pageOtp = document.getElementById('page-otp');
     const pageForgotPassword = document.getElementById('page-forgot-password');
     const pageResetPassword = document.getElementById('page-reset-password');
     const pageChat = document.getElementById('page-chat');
 
     // Forms
     const formLogin = document.getElementById('form-login');
-    const formRegister = document.getElementById('form-register');
-    const formOtp = document.getElementById('form-otp');
     const formForgotPassword = document.getElementById('form-forgot-password');
     const formResetPassword = document.getElementById('form-reset-password');
 
     // Navigation Links
-    const linkToRegister = document.getElementById('link-to-register');
     const linkToLogin = document.getElementById('link-to-login');
-    const linkBackRegister = document.getElementById('link-back-register');
     const linkToForgotPassword = document.getElementById('link-to-forgot-password');
     const linkBackLoginFromForgot = document.getElementById('link-back-login-from-forgot');
     const linkBackForgot = document.getElementById('link-back-forgot');
@@ -109,9 +103,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Link Handlers
-    linkToRegister.addEventListener('click', (e) => { e.preventDefault(); showPage('page-register'); });
     linkToLogin.addEventListener('click', (e) => { e.preventDefault(); showPage('page-login'); });
-    linkBackRegister.addEventListener('click', (e) => { e.preventDefault(); showPage('page-register'); });
     linkToForgotPassword.addEventListener('click', (e) => { e.preventDefault(); showPage('page-forgot-password'); });
     linkBackLoginFromForgot.addEventListener('click', (e) => { e.preventDefault(); showPage('page-login'); });
     linkBackForgot.addEventListener('click', (e) => { e.preventDefault(); showPage('page-forgot-password'); });
@@ -189,39 +181,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Register Handler
-    formRegister.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const email = document.getElementById('reg-email').value;
-        const username = document.getElementById('reg-username').value;
-        const password = document.getElementById('reg-password').value;
-        
-        const btn = formRegister.querySelector('button');
-        btn.disabled = true;
-        btn.textContent = 'Registering...';
 
-        try {
-            const res = await fetch('/api/auth/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, username, password })
-            });
-            const data = await res.json();
-            
-            if (res.ok) {
-                showToast('Account created! Please login.', 'success');
-                formRegister.reset();
-                showPage('page-login');
-            } else {
-                showToast(data.error, 'error');
-            }
-        } catch (err) {
-            showToast('Registration failed. Check connection.', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Register';
-        }
-    });
 
     // OTP Input Logic (For both Registration and Reset Password)
     const setupOtpInputs = (selector) => {
@@ -239,47 +199,10 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
     };
-    setupOtpInputs('#form-otp .otp-digit');
+
     setupOtpInputs('#form-reset-password .reset-digit');
 
-    // OTP Submit Handler
-    formOtp.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const otpInputs = document.querySelectorAll('#form-otp .otp-digit');
-        const code = Array.from(otpInputs).map(i => i.value).join('');
-        if (code.length !== 6) {
-            showToast('Please enter all 6 digits', 'error');
-            return;
-        }
 
-        const btn = formOtp.querySelector('button');
-        btn.disabled = true;
-        btn.textContent = 'Verifying...';
-
-        try {
-            const res = await fetch('/api/auth/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: pendingOtpEmail, code })
-            });
-            const data = await res.json();
-            
-            if (res.ok) {
-                showToast('Verified! You can now login.', 'success');
-                showPage('page-login');
-                // clear reg form
-                formRegister.reset();
-                otpInputs.forEach(i => i.value = '');
-            } else {
-                showToast(data.error, 'error');
-            }
-        } catch (err) {
-            showToast('Verification failed. Check connection.', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Verify Account';
-        }
-    });
 
     // Login Handler
     formLogin.addEventListener('submit', async (e) => {
