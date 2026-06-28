@@ -13,4 +13,3 @@ langgraph
 authlib
 httpx
 itsdangerous
-google-generativeai

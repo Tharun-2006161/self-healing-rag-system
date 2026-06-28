@@ -158,14 +158,35 @@ STATIC_FOLDER = Path(__file__).parent / "static"
 KB_IMAGES_FOLDER = STATIC_FOLDER / "kb_images"
 KB_IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
 
+import httpx
 import chromadb.utils.embedding_functions as embedding_functions
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-# Use Google Gemini API for embeddings to save RAM
-google_ef = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-    api_key=os.environ.get("GOOGLE_API_KEY", "dummy_key")
-)
+class GeminiEmbeddingFunction(embedding_functions.EmbeddingFunction):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
+        if not self.api_key or self.api_key == "dummy_key":
+            return [[0.0]*768 for _ in input]
+            
+        embeddings = []
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={self.api_key}"
+        with httpx.Client() as client:
+            for text in input:
+                payload = {
+                    "model": "models/text-embedding-004",
+                    "content": {"parts": [{"text": text}]}
+                }
+                response = client.post(url, json=payload, timeout=15.0)
+                if response.status_code != 200:
+                    raise Exception(f"Gemini API error: {response.text}")
+                data = response.json()
+                embeddings.append(data["embedding"]["values"])
+        return embeddings
+
+google_ef = GeminiEmbeddingFunction(api_key=os.environ.get("GOOGLE_API_KEY", "dummy_key"))
 
 collection = chroma_client.get_or_create_collection(
     name="knowledge_base",
