@@ -169,6 +169,15 @@ text_splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=50,
 )
 
+# Force ChromaDB to download and load the embedding model into memory on startup.
+# This prevents the first /api/documents request from timing out or hitting memory spikes.
+print("Initializing embedding model...")
+try:
+    collection.query(query_texts=["init"], n_results=1)
+    print("Embedding model loaded successfully.")
+except Exception as e:
+    print(f"Embedding model init info (expected if empty): {e}")
+
 
 # ── Ingestion Helper ────────────────────────────────────────────────────────
 
