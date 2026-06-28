@@ -615,7 +615,7 @@ async def get_stats():
         count = 0
     return JSONResponse({
         "total_chunks": count,
-        "collection_name": "knowledge_base",
+        "collection_name": "knowledge_base_gemini",
         "model": "llama-3.3-70b-versatile",
     })
 
