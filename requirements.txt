@@ -10,3 +10,6 @@ langchain-core
 langchain-text-splitters
 chromadb
 langgraph
+authlib
+httpx
+itsdangerous

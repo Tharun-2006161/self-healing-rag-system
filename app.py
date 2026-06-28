@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import TypedDict, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from authlib.integrations.starlette_client import OAuth
+from starlette.middleware.sessions import SessionMiddleware
 
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
@@ -340,6 +342,18 @@ app_graph = workflow.compile()
 # ── FastAPI Web Server ───────────────────────────────────────────────────────
 
 app = FastAPI(title="AU Chatbot System")
+app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
+
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
 
 # Serve static files
 static_path = Path(__file__).parent / "static"
@@ -355,6 +369,54 @@ async def home():
 
 
 # ── Auth Endpoints ──────────────────────────────────────────────────────────
+
+@app.get("/api/auth/google/login")
+async def google_login(request: Request):
+    redirect_uri = str(request.url_for('google_auth_callback'))
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+@app.get("/api/auth/google/callback")
+async def google_auth_callback(request: Request, response: Response):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get('userinfo')
+        if not user_info:
+            return RedirectResponse(url="/?error=google_auth_failed")
+            
+        email = user_info.get("email").lower()
+        username = user_info.get("name", "Google User")
+        
+        user = users_collection.find_one({"email": email})
+        if not user:
+            role = "admin" if email == ADMIN_EMAIL else "user"
+            random_pw = secrets.token_hex(16)
+            hashed_pw = bcrypt.hashpw(random_pw.encode('utf-8'), bcrypt.gensalt())
+            
+            users_collection.insert_one({
+                "email": email,
+                "username": username,
+                "password_hash": hashed_pw.decode('utf-8'),
+                "role": role,
+                "verified": 1,
+                "created_at": datetime.utcnow().isoformat(),
+                "provider": "google"
+            })
+            
+        access_token = create_access_token(data={"sub": email})
+        
+        resp = RedirectResponse(url="/")
+        resp.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            max_age=7 * 24 * 60 * 60,
+            samesite="lax",
+            secure=False
+        )
+        return resp
+    except Exception as e:
+        print("Google auth error:", e)
+        return RedirectResponse(url="/?error=google_auth_failed")
 
 @app.post("/api/auth/register")
 async def register(request: Request):
