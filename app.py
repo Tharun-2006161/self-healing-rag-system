@@ -401,54 +401,22 @@ async def register(request: Request, db: sqlite3.Connection = Depends(get_db)):
 
     if not email or not username or not password:
         return JSONResponse({"error": "Missing required fields"}, status_code=400)
-    
-    if "@gmail.com" not in email:
-        return JSONResponse({"error": "Only Gmail addresses are allowed"}, status_code=400)
 
     c = db.cursor()
     c.execute("SELECT * FROM users WHERE email = ?", (email,))
     if c.fetchone():
-        # User exists but might not be verified. If verified, error.
-        c.execute("SELECT * FROM users WHERE email = ? AND verified = 1", (email,))
-        if c.fetchone():
-            return JSONResponse({"error": "Email already registered"}, status_code=400)
-        else:
-            # Delete unverified user to recreate
-            c.execute("DELETE FROM users WHERE email = ?", (email,))
+        return JSONResponse({"error": "Email already registered"}, status_code=400)
 
     hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    
     role = "admin" if email == ADMIN_EMAIL else "user"
-    
+
     c.execute(
-        "INSERT INTO users (email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO users (email, username, password_hash, role, verified, created_at) VALUES (?, ?, ?, ?, 1, ?)",
         (email, username, hashed_pw.decode('utf-8'), role, datetime.utcnow().isoformat())
-    )
-    
-    # Generate OTP
-    code = f"{secrets.randbelow(1000000):06d}"
-    expires = datetime.utcnow() + timedelta(minutes=5)
-    
-    # Delete old OTPs for this email
-    c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-    
-    c.execute(
-        "INSERT INTO otp_codes (email, code, created_at, expires_at) VALUES (?, ?, ?, ?)",
-        (email, code, datetime.utcnow().isoformat(), expires.isoformat())
     )
     db.commit()
 
-    try:
-        await send_otp_email(email, code)
-    except Exception as e:
-        # If email fails, delete the user so they can try again later
-        c.execute("DELETE FROM users WHERE email = ?", (email,))
-        c.execute("DELETE FROM otp_codes WHERE email = ?", (email,))
-        db.commit()
-        error_msg = str(e)
-        return JSONResponse({"error": f"Email failed: {error_msg}"}, status_code=500)
-
-    return {"message": "OTP sent to email", "email": email}
+    return {"message": "Registration successful. You can now login."}
 
 
 @app.post("/api/auth/verify-otp")
@@ -494,9 +462,6 @@ async def login(request: Request, response: Response, db: sqlite3.Connection = D
 
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user["password_hash"].encode('utf-8')):
         return JSONResponse({"error": "Invalid email or password"}, status_code=401)
-
-    if user["verified"] != 1:
-        return JSONResponse({"error": "Account not verified. Please register again to get a new OTP."}, status_code=403)
 
     access_token = create_access_token(data={"sub": user["email"]})
     

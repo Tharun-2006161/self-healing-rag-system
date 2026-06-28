@@ -198,7 +198,7 @@ document.addEventListener('DOMContentLoaded', function () {
         
         const btn = formRegister.querySelector('button');
         btn.disabled = true;
-        btn.textContent = 'Sending OTP...';
+        btn.textContent = 'Registering...';
 
         try {
             const res = await fetch('/api/auth/register', {
@@ -209,10 +209,9 @@ document.addEventListener('DOMContentLoaded', function () {
             const data = await res.json();
             
             if (res.ok) {
-                pendingOtpEmail = email;
-                document.getElementById('otp-email-display').textContent = email;
-                showPage('page-otp');
-                showToast('OTP sent to your email!', 'success');
+                showToast('Account created! Please login.', 'success');
+                formRegister.reset();
+                showPage('page-login');
             } else {
                 showToast(data.error, 'error');
             }
