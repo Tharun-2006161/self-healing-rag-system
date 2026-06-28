@@ -6,17 +6,20 @@ document.addEventListener('DOMContentLoaded', function () {
     
     // Pages
     const pageLogin = document.getElementById('page-login');
+    const pageRegister = document.getElementById('page-register');
     const pageForgotPassword = document.getElementById('page-forgot-password');
     const pageResetPassword = document.getElementById('page-reset-password');
     const pageChat = document.getElementById('page-chat');
 
     // Forms
     const formLogin = document.getElementById('form-login');
+    const formRegister = document.getElementById('form-register');
     const formForgotPassword = document.getElementById('form-forgot-password');
     const formResetPassword = document.getElementById('form-reset-password');
 
     // Navigation Links
     const linkToLogin = document.getElementById('link-to-login');
+    const linkToRegister = document.getElementById('link-to-register');
     const linkToForgotPassword = document.getElementById('link-to-forgot-password');
     const linkBackLoginFromForgot = document.getElementById('link-back-login-from-forgot');
     const linkBackForgot = document.getElementById('link-back-forgot');
@@ -104,6 +107,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Link Handlers
     linkToLogin.addEventListener('click', (e) => { e.preventDefault(); showPage('page-login'); });
+    if(linkToRegister) linkToRegister.addEventListener('click', (e) => { e.preventDefault(); showPage('page-register'); });
     linkToForgotPassword.addEventListener('click', (e) => { e.preventDefault(); showPage('page-forgot-password'); });
     linkBackLoginFromForgot.addEventListener('click', (e) => { e.preventDefault(); showPage('page-login'); });
     linkBackForgot.addEventListener('click', (e) => { e.preventDefault(); showPage('page-forgot-password'); });
@@ -182,6 +186,46 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
 
+
+    // Register Handler
+    formRegister.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('reg-username').value;
+        const password = document.getElementById('reg-password').value;
+        const confirmPassword = document.getElementById('reg-confirm-password').value;
+        const email = document.getElementById('reg-email').value;
+        
+        if (password !== confirmPassword) {
+            showToast('Passwords do not match', 'error');
+            return;
+        }
+
+        const btn = formRegister.querySelector('button');
+        btn.disabled = true;
+        btn.textContent = 'Signing Up...';
+
+        try {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, username, password })
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                showToast('Account created! Please sign in.', 'success');
+                formRegister.reset();
+                showPage('page-login');
+            } else {
+                showToast(data.error, 'error');
+            }
+        } catch (err) {
+            showToast('Registration failed. Check connection.', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Sign Up';
+        }
+    });
 
     // OTP Input Logic (For both Registration and Reset Password)
     const setupOtpInputs = (selector) => {
